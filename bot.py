@@ -1,6 +1,7 @@
-﻿import logging
+import logging
 import asyncio
 import os
+import aiohttp
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums.parse_mode import ParseMode
@@ -8,12 +9,16 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, U
 from aiogram.client.default import DefaultBotProperties
 
 from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+
+# 🔐 загружаем .env
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
-# 🔐 ENV переменные
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.onrender.com
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+SELF_PING_URL = os.getenv("SELF_PING_URL")
 
 bot = Bot(
     token=TOKEN,
@@ -22,6 +27,23 @@ bot = Bot(
 
 dp = Dispatcher()
 app = FastAPI()
+
+
+# =========================
+# 🧠 ПИЛИНГОВКА (антисон)
+# =========================
+async def self_ping():
+    await asyncio.sleep(10)  # ждём запуск
+
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(SELF_PING_URL) as resp:
+                    logging.info(f"PING: {resp.status}")
+        except Exception as e:
+            logging.error(f"PING ERROR: {e}")
+
+        await asyncio.sleep(300)  # каждые 5 минут
 
 
 # =========================
@@ -83,7 +105,6 @@ async def catch_replies(message: Message):
         header = "🔔 <b>Вам ответили в группе!</b>\n\n"
         await bot.send_message(author.id, header)
 
-        # Оригинал
         if orig_media_type:
             await getattr(bot, f"send_{orig_media_type}")(
                 author.id,
@@ -93,7 +114,6 @@ async def catch_replies(message: Message):
         elif orig_text:
             await bot.send_message(author.id, f"📌 <b>Ваше сообщение:</b>\n{orig_text}")
 
-        # Ответ
         if reply_media_type:
             await getattr(bot, f"send_{reply_media_type}")(
                 author.id,
@@ -125,9 +145,6 @@ async def webhook(request: Request):
     return {"ok": True}
 
 
-# =========================
-# 🟢 ПИНГ ДЛЯ RENDER
-# =========================
 @app.get("/ping")
 async def ping():
     return {"status": "alive 🚀"}
@@ -143,8 +160,9 @@ async def on_startup():
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
         logging.info(f"Webhook установлен: {WEBHOOK_URL}")
-    else:
-        logging.error("WEBHOOK_URL не установлен!")
+
+    # 🔥 запускаем пилинговку
+    asyncio.create_task(self_ping())
 
 
 @app.on_event("shutdown")
